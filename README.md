@@ -69,3 +69,10 @@ cd ~/.local/share/chezmoi
 git pull --ff-only
 chezmoi apply
 ```
+
+## 脚本行为
+
+- 可以重复运行。已存在的 Homebrew、brew 包、chezmoi source 会复用；dotfiles 已克隆时执行 `git pull --ff-only`。
+- 安装前会显示进度，例如 `[2/4] 检查 GitHub 登录`。
+- 必需项会直接安装或检查；可选项在私有 dotfiles 脚本里按类别选择。
+- 可能需要人工处理的步骤：Xcode Command Line Tools 弹窗、`gh auth login`、sudo 密码、网络失败后重跑。
