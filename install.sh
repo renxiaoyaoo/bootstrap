@@ -10,7 +10,7 @@ yellow(){ printf '\033[0;33m%s\033[0m\n' "$1"; }
 log() { cyan "▶ $1"; }
 warn() { yellow "⚠ $1"; }
 
-DOTFILES_REPO="renxiaoyaoo/dotfiles"
+DOTFILES_REPO="${DOTFILES_REPO:-}"
 CHEZMOI_SOURCE="$HOME/.local/share/chezmoi"
 OS="$(uname)"
 STEP=0
@@ -24,9 +24,9 @@ step() {
 
 tool_reason() {
   case "$1" in
-    git) echo "克隆和更新私有 dotfiles 仓库。" ;;
-    gh) echo "登录 GitHub；私有 dotfiles 需要认证后才能克隆。" ;;
-    chezmoi) echo "把 dotfiles source 应用到当前设备。" ;;
+    git) echo "克隆和更新配置仓库。" ;;
+    gh) echo "登录 GitHub；后续步骤需要访问你的仓库。" ;;
+    chezmoi) echo "把配置仓库应用到当前设备。" ;;
     curl) echo "下载初始化脚本和安装器。" ;;
     ca-certificates) echo "让 HTTPS 下载和 Git 访问正常校验证书。" ;;
     *) echo "初始化流程需要的基础工具。" ;;
@@ -54,8 +54,8 @@ as_root() {
   elif command -v sudo >/dev/null 2>&1; then
     sudo "$@"
   else
-    red "This step needs root privileges, but sudo is not installed."
-    red "Run as root, or install sudo, then re-run this script."
+    red "这一步需要 root 权限，但系统里没有 sudo。"
+    red "请用 root 运行，或先安装 sudo，然后重跑初始化命令。"
     exit 1
   fi
 }
@@ -66,8 +66,8 @@ ensure_macos_prereqs() {
   if ! xcode-select -p >/dev/null 2>&1; then
     notice "必需安装" "Xcode Command Line Tools" "提供 git、编译工具和 Homebrew 依赖的系统开发工具。"
     xcode-select --install || true
-    cyan "Xcode Command Line Tools installation was requested."
-    cyan "After it finishes, re-run this script."
+    cyan "已请求安装 Xcode Command Line Tools。"
+    cyan "安装完成后，重新运行这条初始化命令。"
     exit 0
   fi
 
@@ -104,7 +104,7 @@ ensure_linux_prereqs() {
   step "检查 Linux 基础依赖"
   log "Installing Linux bootstrap tools"
   if ! command -v apt-get >/dev/null 2>&1; then
-    red "Unsupported Linux package manager. This bootstrap currently supports apt-get systems."
+    red "当前 Linux 包管理器暂不支持。这个初始化脚本目前只支持 apt-get 系统。"
     exit 1
   fi
 
@@ -119,8 +119,8 @@ ensure_linux_prereqs() {
       notice_tool "必需安装" "gh"
       as_root apt-get install -y gh
     else
-      red "GitHub CLI is not available from this apt repository."
-      red "Install gh manually, then re-run this script."
+      red "当前 apt 源里没有 GitHub CLI。"
+      red "请先手动安装 gh，然后重跑初始化命令。"
       exit 1
     fi
   fi
@@ -141,14 +141,19 @@ ensure_github_auth() {
     return
   fi
 
-  warn "GitHub login is required because dotfiles is private."
-  cyan "Follow the browser/device-code instructions from gh auth login."
+  warn "GitHub login is required for the next setup step."
+  cyan "请按 gh auth login 显示的浏览器或设备码提示完成登录。"
   gh auth login -h github.com -s repo
 }
 
 init_or_update_dotfiles() {
-  step "拉取私有 dotfiles"
+  step "拉取配置仓库"
   log "Setting up chezmoi source"
+
+  if [ -z "$DOTFILES_REPO" ]; then
+    github_user="$(gh api user --jq .login)"
+    DOTFILES_REPO="$github_user/dotfiles"
+  fi
 
   if [ -d "$CHEZMOI_SOURCE/.git" ]; then
     git -C "$CHEZMOI_SOURCE" pull --ff-only
@@ -156,8 +161,8 @@ init_or_update_dotfiles() {
   fi
 
   if [ -d "$CHEZMOI_SOURCE" ]; then
-    red "$CHEZMOI_SOURCE exists but is not a git repository."
-    red "Move it aside after checking its contents, then re-run."
+    red "$CHEZMOI_SOURCE 已存在，但不是 Git 仓库。"
+    red "请先确认里面内容，移走或备份后再重跑初始化命令。"
     exit 1
   fi
 
@@ -165,20 +170,20 @@ init_or_update_dotfiles() {
   gh repo clone "$DOTFILES_REPO" "$CHEZMOI_SOURCE"
 }
 
-run_private_bootstrap() {
+run_dotfiles_bootstrap() {
   chmod +x "$CHEZMOI_SOURCE/files/bootstrap.sh"
   if [ -f "$CHEZMOI_SOURCE/files/doctor.sh" ]; then
     chmod +x "$CHEZMOI_SOURCE/files/doctor.sh"
   fi
 
-  step "运行私有初始化脚本"
-  log "Running private dotfiles bootstrap"
+  step "运行初始化脚本"
+  log "Running dotfiles bootstrap"
   exec "$CHEZMOI_SOURCE/files/bootstrap.sh"
 }
 
 log "Public bootstrap entry"
 cyan "This script only installs minimal tools and authenticates GitHub."
-cyan "Private config stays in $DOTFILES_REPO."
+cyan "Personal config is handled after authentication."
 
 case "$OS" in
   Darwin) ensure_macos_prereqs ;;
@@ -191,4 +196,4 @@ esac
 
 ensure_github_auth
 init_or_update_dotfiles
-run_private_bootstrap
+run_dotfiles_bootstrap

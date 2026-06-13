@@ -1,13 +1,6 @@
 # bootstrap
 
-公开的新设备初始化入口，用来启动私有仓库 `renxiaoyaoo/dotfiles`。
-
-这个仓库必须保持公开，并且不能放任何密钥、token、私钥或真实配置。它只做最小引导：
-
-- 安装 `git`、`gh`、`chezmoi`
-- 引导 `gh auth login`
-- 把私有 `renxiaoyaoo/dotfiles` 克隆到 `~/.local/share/chezmoi`
-- 执行私有仓库里的 `~/.local/share/chezmoi/files/bootstrap.sh`
+公开的新设备初始化入口。
 
 ## macOS
 
@@ -31,48 +24,8 @@ else
 fi
 ```
 
-## 执行完成后
-
-检查当前设备：
+## 检查
 
 ```sh
 ~/.local/share/chezmoi/files/doctor.sh
 ```
-
-日常维护 dotfiles 的主目录是：
-
-```sh
-~/.local/share/chezmoi
-```
-
-日常流程：
-
-```sh
-# 直接改真实配置文件
-vim ~/.ssh/config
-
-# 收进 chezmoi source
-chezmoi add ~/.ssh/config
-
-# 提交并推送
-cd ~/.local/share/chezmoi
-git diff
-git add .
-git commit -m "Update dotfiles"
-git push
-```
-
-另一台设备同步：
-
-```sh
-cd ~/.local/share/chezmoi
-git pull --ff-only
-chezmoi apply
-```
-
-## 脚本行为
-
-- 可以重复运行。已存在的 Homebrew、brew 包、chezmoi source 会复用；dotfiles 已克隆时执行 `git pull --ff-only`。
-- 安装前会显示进度，例如 `[2/4] 检查 GitHub 登录`。
-- 必需项会直接安装或检查；可选项在私有 dotfiles 脚本里按类别选择。
-- 可能需要人工处理的步骤：Xcode Command Line Tools 弹窗、`gh auth login`、sudo 密码、网络失败后重跑。
