@@ -14,7 +14,7 @@ DOTFILES_REPO="${DOTFILES_REPO:-}"
 CHEZMOI_SOURCE="$HOME/.local/share/chezmoi"
 OS="$(uname)"
 STEP=0
-TOTAL_STEPS=4
+TOTAL_STEPS=5
 
 step() {
   STEP=$((STEP + 1))
@@ -146,6 +146,25 @@ ensure_github_auth() {
   gh auth login -h github.com -s repo
 }
 
+ensure_github_ssh() {
+  step "配置 GitHub SSH"
+  log "Configuring GitHub SSH"
+
+  mkdir -p "$HOME/.ssh"
+  chmod 700 "$HOME/.ssh"
+
+  if [ ! -f "$HOME/.ssh/id_ed25519" ]; then
+    notice "必需生成" "SSH key" "用于通过 SSH 拉取和推送 GitHub 仓库。"
+    ssh-keygen -t ed25519 -C "$(whoami)@$(hostname)-$(date +%Y%m%d)" -f "$HOME/.ssh/id_ed25519" -N ""
+  fi
+
+  if [ -f "$HOME/.ssh/id_ed25519.pub" ]; then
+    gh ssh-key add "$HOME/.ssh/id_ed25519.pub" --title "$(hostname)-$(date +%Y%m%d)" 2>/dev/null || true
+  fi
+
+  gh config set git_protocol ssh -h github.com >/dev/null
+}
+
 init_or_update_dotfiles() {
   step "拉取配置仓库"
   log "Setting up chezmoi source"
@@ -154,8 +173,16 @@ init_or_update_dotfiles() {
     github_user="$(gh api user --jq .login)"
     DOTFILES_REPO="$github_user/dotfiles"
   fi
+  DOTFILES_SSH_URL="git@github.com:$DOTFILES_REPO.git"
 
   if [ -d "$CHEZMOI_SOURCE/.git" ]; then
+    current_url="$(git -C "$CHEZMOI_SOURCE" remote get-url origin 2>/dev/null || true)"
+    case "$current_url" in
+      https://github.com/*)
+        cyan "已存在的配置仓库使用 HTTPS，切换为 SSH。"
+        git -C "$CHEZMOI_SOURCE" remote set-url origin "$DOTFILES_SSH_URL"
+        ;;
+    esac
     git -C "$CHEZMOI_SOURCE" pull --ff-only
     return
   fi
@@ -167,7 +194,7 @@ init_or_update_dotfiles() {
   fi
 
   mkdir -p "$(dirname "$CHEZMOI_SOURCE")"
-  gh repo clone "$DOTFILES_REPO" "$CHEZMOI_SOURCE"
+  git clone "$DOTFILES_SSH_URL" "$CHEZMOI_SOURCE"
 }
 
 run_dotfiles_bootstrap() {
@@ -195,5 +222,6 @@ case "$OS" in
 esac
 
 ensure_github_auth
+ensure_github_ssh
 init_or_update_dotfiles
 run_dotfiles_bootstrap
