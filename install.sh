@@ -68,8 +68,8 @@ github_ssh_key_title() {
   local title="$default_title"
 
   if [ -t 0 ]; then
-    cyan "GitHub SSH key 名称用于在 GitHub 网页里识别这台设备。"
-    printf "名称 [%s]: " "$default_title"
+    cyan "SSH key 名称: 只用于 GitHub 页面识别。"
+    printf "SSH key 名称 [%s]: " "$default_title"
     read -r title
     [ -z "$title" ] && title="$default_title"
   fi
@@ -115,21 +115,20 @@ configure_device_name() {
     current_computer="$(scutil --get ComputerName 2>/dev/null || device_short_name)"
     current_local="$(scutil --get LocalHostName 2>/dev/null || sanitize_local_hostname "$current_computer")"
 
-    cyan "设置 macOS 设备名称。回车使用方括号里的建议值。"
-    cyan "ComputerName: 系统设置、共享和隔空投送里看到的显示名，可以有空格。"
-    printf "ComputerName（关于本机显示名）[%s]: " "$current_computer"
+    cyan "ComputerName: 关于本机/共享显示名，可有空格。"
+    printf "ComputerName [%s]: " "$current_computer"
     read -r computer_name
     [ -z "$computer_name" ] && computer_name="$current_computer"
 
     network_suggestion="$(sanitize_local_hostname "$computer_name")"
     [ -z "$network_suggestion" ] && network_suggestion="$current_local"
-    cyan "网络/SSH 名称: 同时用于 LocalHostName 和 HostName；局域网访问通常是 xxxx.local，系统实际保存 xxxx。"
-    printf "网络/SSH 名称 [%s.local]: " "$network_suggestion"
+    cyan "网络/SSH 名称: 输入基础名即可；访问时是 ${network_suggestion}.local。"
+    printf "网络/SSH 名称 [%s]: " "$network_suggestion"
     read -r raw_name
     [ -z "$raw_name" ] && raw_name="$network_suggestion"
     safe_name="$(sanitize_local_hostname "$raw_name")"
     if [ "$raw_name" != "$safe_name" ] && [ "$raw_name" != "${safe_name}.local" ]; then
-      cyan "网络/SSH 名称将使用安全值: ${safe_name}"
+      cyan "网络/SSH 名称将使用: ${safe_name}"
     fi
     network_name="$safe_name"
 
@@ -138,7 +137,7 @@ configure_device_name() {
       return
     fi
 
-    notice "需要设置" "macOS 设备名称" "ComputerName/LocalHostName/HostName 会影响关于本机、局域网名称和 SSH/终端识别。"
+    notice "需要设置" "macOS 设备名称" "设置显示名、局域网名和 SSH/终端识别名。"
     changed=0
     if [ "$(scutil --get ComputerName 2>/dev/null || true)" != "$computer_name" ]; then
       as_root scutil --set ComputerName "$computer_name"
@@ -292,7 +291,12 @@ ensure_github_ssh() {
   fi
 
   if [ -f "$HOME/.ssh/id_ed25519.pub" ]; then
-    gh ssh-key add "$HOME/.ssh/id_ed25519.pub" --title "$key_title" 2>/dev/null || true
+    cyan "Adding SSH key to GitHub: $key_title"
+    if gh ssh-key add "$HOME/.ssh/id_ed25519.pub" --title "$key_title" >/dev/null 2>&1; then
+      green "SSH key registered"
+    else
+      cyan "SSH key may already exist, continue"
+    fi
   fi
 
   gh config set git_protocol ssh -h github.com >/dev/null
