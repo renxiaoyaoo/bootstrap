@@ -14,7 +14,7 @@ DOTFILES_REPO="${DOTFILES_REPO:-}"
 CHEZMOI_SOURCE="$HOME/.local/share/chezmoi"
 OS="$(uname)"
 STEP=0
-TOTAL_STEPS=6
+TOTAL_STEPS=4
 
 step() {
   STEP=$((STEP + 1))
@@ -24,12 +24,12 @@ step() {
 
 tool_reason() {
   case "$1" in
-    git) echo "克隆和更新配置仓库。" ;;
-    gh) echo "登录 GitHub；后续步骤需要访问你的仓库。" ;;
-    chezmoi) echo "把配置仓库应用到当前设备。" ;;
-    curl) echo "下载初始化脚本和安装器。" ;;
-    ca-certificates) echo "让 HTTPS 下载和 Git 访问正常校验证书。" ;;
-    *) echo "初始化流程需要的基础工具。" ;;
+    git) echo "Clone and update repositories." ;;
+    gh) echo "GitHub login for private repositories." ;;
+    chezmoi) echo "Apply dotfiles to this device." ;;
+    curl) echo "Download bootstrap scripts and installers." ;;
+    ca-certificates) echo "Verify HTTPS downloads and Git connections." ;;
+    *) echo "Required by the bootstrap flow." ;;
   esac
 }
 
@@ -40,7 +40,7 @@ notice() {
 
   yellow "============================================================"
   yellow "[$kind] $name"
-  cyan "用途: $reason"
+  cyan "Why: $reason"
   yellow "============================================================"
 }
 
@@ -54,258 +54,20 @@ as_root() {
   elif command -v sudo >/dev/null 2>&1; then
     sudo "$@"
   else
-    red "这一步需要 root 权限，但系统里没有 sudo。"
-    red "请用 root 运行，或先安装 sudo，然后重跑初始化命令。"
+    red "Root permission is required, but sudo is not available."
+    red "Run as root or install sudo, then rerun this command."
     exit 1
   fi
 }
 
-run_with_timeout() {
-  local seconds="$1"
-  shift
-  "$@" &
-  local pid=$!
-  local elapsed=0
-
-  while kill -0 "$pid" 2>/dev/null; do
-    if [ "$elapsed" -ge "$seconds" ]; then
-      kill "$pid" 2>/dev/null || true
-      wait "$pid" 2>/dev/null || true
-      return 124
-    fi
-    sleep 1
-    elapsed=$((elapsed + 1))
-  done
-
-  wait "$pid"
-}
-
-has_tty() {
-  [ -r /dev/tty ] && [ -w /dev/tty ]
-}
-
-prompt_read() {
-  local __var="$1"
-  local __value
-  if has_tty; then
-    IFS= read -r __value < /dev/tty
-  else
-    __value=""
-  fi
-  eval "$__var=\$__value"
-}
-
-RUN_STATUS_OUTPUT=""
-RUN_STATUS_ERROR=""
-
-cleanup_status_files() {
-  [ -n "$RUN_STATUS_OUTPUT" ] && rm -f "$RUN_STATUS_OUTPUT"
-  [ -n "$RUN_STATUS_ERROR" ] && rm -f "$RUN_STATUS_ERROR"
-  RUN_STATUS_OUTPUT=""
-  RUN_STATUS_ERROR=""
-}
-
-run_with_status() {
-  local label="$1"
-  local seconds="$2"
-  shift 2
-  local pid elapsed frame status
-
-  cleanup_status_files
-  RUN_STATUS_OUTPUT="$(mktemp)"
-  RUN_STATUS_ERROR="$(mktemp)"
-
-  "$@" >"$RUN_STATUS_OUTPUT" 2>"$RUN_STATUS_ERROR" &
-  pid=$!
-  elapsed=0
-
-  while kill -0 "$pid" 2>/dev/null; do
-    if [ "$elapsed" -ge "$seconds" ]; then
-      kill "$pid" 2>/dev/null || true
-      wait "$pid" 2>/dev/null || true
-      if [ -t 1 ]; then
-        printf "\r\033[K"
-      fi
-      yellow "$label: timeout"
-      return 124
-    fi
-
-    frame="$(printf '|/-\\' | cut -c $((elapsed % 4 + 1)))"
-    if [ -t 1 ]; then
-      printf "\r%s %s... %ss" "$frame" "$label" "$elapsed"
-    elif [ "$elapsed" -eq 0 ]; then
-      cyan "$label..."
-    fi
-    sleep 1
-    elapsed=$((elapsed + 1))
-  done
-
-  wait "$pid"
-  status=$?
-  if [ -t 1 ]; then
-    printf "\r\033[K"
-  fi
-  if [ "$status" -eq 0 ]; then
-    green "$label: ok"
-  else
-    yellow "$label: failed"
-  fi
-  return "$status"
-}
-
-github_ssh_key_title() {
-  local device_name
-  device_name="$(ssh_key_device_name)"
-
-  local default_title="$(whoami)@$device_name"
-  local title="$default_title"
-
-  if has_tty; then
-    cyan "SSH key 名称: 只用于 GitHub 页面识别；直接回车即可。" > /dev/tty
-    printf "SSH key 名称 [%s]: " "$default_title" > /dev/tty
-    prompt_read title
-    [ -z "$title" ] && title="$default_title"
-  fi
-
-  echo "$title"
-}
-
-ssh_key_device_name() {
-  device_short_name | sed 's/[.]local$//'
-}
-
-device_short_name() {
-  if [ "$OS" = "Darwin" ]; then
-    scutil --get HostName 2>/dev/null || scutil --get LocalHostName 2>/dev/null || hostname -s 2>/dev/null || hostname
-  else
-    hostname -s 2>/dev/null || hostname
-  fi
-}
-
-current_network_name() {
-  if [ "$OS" = "Darwin" ]; then
-    scutil --get HostName 2>/dev/null || scutil --get LocalHostName 2>/dev/null || hostname -s 2>/dev/null || hostname
-  else
-    hostname -s 2>/dev/null || hostname
-  fi
-}
-
-sanitize_hostname() {
-  printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g; s/--*/-/g; s/^-//; s/-$//'
-}
-
-sanitize_local_hostname() {
-  printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[.]local$//; s/[^a-z0-9-]/-/g; s/--*/-/g; s/^-//; s/-$//'
-}
-
-configure_device_name() {
-  step "设置设备名称"
-
-  local current_name
-  current_name="$(device_short_name)"
-
-  if ! has_tty; then
-    cyan "非交互环境，保留当前设备名: $current_name"
-    return
-  fi
-
-  if [ "$OS" = "Darwin" ]; then
-    local current_computer current_network current_host current_local current_hostname
-    local computer_name network_name network_suggestion raw_name safe_name changed
-
-    current_computer="$(scutil --get ComputerName 2>/dev/null || device_short_name)"
-    current_host="$(scutil --get HostName 2>/dev/null || true)"
-    current_local="$(scutil --get LocalHostName 2>/dev/null || true)"
-    current_hostname="$(hostname -s 2>/dev/null || hostname)"
-    current_network="$(current_network_name)"
-
-    cyan "当前: ComputerName=${current_computer:-未设置}, HostName=${current_host:-未设置}, LocalHostName=${current_local:-未设置}, hostname=${current_hostname:-未设置}"
-    cyan "ComputerName: 关于本机/共享显示名，可有空格。"
-    printf "ComputerName [%s]: " "$current_computer"
-    prompt_read computer_name
-    [ -z "$computer_name" ] && computer_name="$current_computer"
-
-    if [ "$computer_name" = "$current_computer" ] && [ -n "$current_network" ]; then
-      network_suggestion="$(sanitize_local_hostname "$current_network")"
-    else
-      network_suggestion="$(sanitize_local_hostname "$computer_name")"
-      [ -z "$network_suggestion" ] && network_suggestion="$(sanitize_local_hostname "$current_network")"
-    fi
-    cyan "网络/SSH 名称: 输入基础名即可；访问时是 ${network_suggestion}.local。"
-    printf "网络/SSH 名称 [%s]: " "$network_suggestion"
-    prompt_read raw_name
-    [ -z "$raw_name" ] && raw_name="$network_suggestion"
-    safe_name="$(sanitize_local_hostname "$raw_name")"
-    if [ "$raw_name" != "$safe_name" ] && [ "$raw_name" != "${safe_name}.local" ]; then
-      cyan "网络/SSH 名称将使用: ${safe_name}"
-    fi
-    network_name="$safe_name"
-
-    if [ -z "$network_name" ]; then
-      red "设备名无效，保留当前值。"
-      return
-    fi
-
-    notice "需要设置" "macOS 设备名称" "设置显示名、局域网名和 SSH/终端识别名。"
-    changed=0
-    if [ "$(scutil --get ComputerName 2>/dev/null || true)" != "$computer_name" ]; then
-      as_root scutil --set ComputerName "$computer_name"
-      changed=1
-    fi
-    if [ "$(scutil --get LocalHostName 2>/dev/null || true)" != "$network_name" ]; then
-      as_root scutil --set LocalHostName "$network_name"
-      changed=1
-    fi
-    if [ "$(scutil --get HostName 2>/dev/null || true)" != "$network_name" ]; then
-      as_root scutil --set HostName "$network_name"
-      changed=1
-    fi
-
-    if [ "$changed" -eq 0 ]; then
-      green "Device name already configured: $network_name"
-    else
-      green "Device name configured: $network_name"
-    fi
-  elif command -v hostnamectl >/dev/null 2>&1; then
-    local raw_name safe_name
-
-    cyan "设置 Linux hostname。回车使用方括号里的建议值。"
-    cyan "HostName: 局域网、SSH、终端和服务识别使用；Linux 通常用短名称。"
-    printf "HostName（局域网、SSH 和服务识别）[%s]: " "$current_name"
-    prompt_read raw_name
-    [ -z "$raw_name" ] && raw_name="$current_name"
-    safe_name="$(sanitize_hostname "$raw_name")"
-    if [ "$safe_name" != "$raw_name" ]; then
-      cyan "HostName 将使用安全值: $safe_name"
-    fi
-
-    if [ -z "$safe_name" ]; then
-      red "设备名无效，保留当前值: $current_name"
-      return
-    fi
-
-    if [ "$(hostnamectl --static 2>/dev/null || hostname)" = "$safe_name" ]; then
-      green "Device name already configured: $safe_name"
-      return
-    fi
-
-    notice "需要设置" "Linux hostname" "用于局域网、SSH 和服务识别。"
-    as_root hostnamectl set-hostname "$safe_name"
-    green "Device name configured: $safe_name"
-  else
-    yellow "当前 Linux 没有 hostnamectl，跳过持久化设备名。"
-    cyan "如需设置，请按发行版方式手动配置 hostname: $safe_name"
-  fi
-}
-
 ensure_macos_prereqs() {
-  step "检查 macOS 基础依赖"
+  step "Check macOS prerequisites"
   log "Checking Xcode Command Line Tools"
   if ! xcode-select -p >/dev/null 2>&1; then
-    notice "必需安装" "Xcode Command Line Tools" "提供 git、编译工具和 Homebrew 依赖的系统开发工具。"
+    notice "Required" "Xcode Command Line Tools" "Provides git, compilers, and Homebrew system dependencies."
     xcode-select --install || true
-    cyan "已请求安装 Xcode Command Line Tools。"
-    cyan "安装完成后，重新运行这条初始化命令。"
+    cyan "Xcode Command Line Tools install requested."
+    cyan "After it finishes, rerun the bootstrap command."
     exit 0
   fi
 
@@ -316,7 +78,7 @@ ensure_macos_prereqs() {
     elif [ -x /usr/local/bin/brew ]; then
       eval "$(/usr/local/bin/brew shellenv)"
     else
-      notice "必需安装" "Homebrew" "macOS 包管理器，用来安装 git、gh、chezmoi。"
+      notice "Required" "Homebrew" "macOS package manager for git, gh, and chezmoi."
       /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
     fi
   fi
@@ -332,39 +94,39 @@ ensure_macos_prereqs() {
     if brew list "$pkg" >/dev/null 2>&1; then
       green "$pkg already installed"
     else
-      notice_tool "必需安装" "$pkg"
+      notice_tool "Required" "$pkg"
       brew install "$pkg"
     fi
   done
 }
 
 ensure_linux_prereqs() {
-  step "检查 Linux 基础依赖"
+  step "Check Linux prerequisites"
   log "Installing Linux bootstrap tools"
   if ! command -v apt-get >/dev/null 2>&1; then
-    red "当前 Linux 包管理器暂不支持。这个初始化脚本目前只支持 apt-get 系统。"
+    red "Unsupported Linux package manager. This bootstrap currently supports apt-get systems."
     exit 1
   fi
 
   as_root apt-get update
   for pkg in curl git ca-certificates; do
-    notice_tool "必需安装/检查" "$pkg"
+    notice_tool "Required/check" "$pkg"
     as_root apt-get install -y "$pkg"
   done
 
   if ! command -v gh >/dev/null 2>&1; then
     if apt-cache show gh >/dev/null 2>&1; then
-      notice_tool "必需安装" "gh"
+      notice_tool "Required" "gh"
       as_root apt-get install -y gh
     else
-      red "当前 apt 源里没有 GitHub CLI。"
-      red "请先手动安装 gh，然后重跑初始化命令。"
+      red "GitHub CLI is not available from the current apt sources."
+      red "Install gh manually, then rerun this command."
       exit 1
     fi
   fi
 
   if ! command -v chezmoi >/dev/null 2>&1; then
-    notice_tool "必需安装" "chezmoi"
+    notice_tool "Required" "chezmoi"
     mkdir -p "$HOME/.local/bin"
     sh -c "$(curl -fsLS get.chezmoi.io)" -- -b "$HOME/.local/bin"
     export PATH="$HOME/.local/bin:$PATH"
@@ -372,7 +134,7 @@ ensure_linux_prereqs() {
 }
 
 ensure_github_auth() {
-  step "检查 GitHub 登录"
+  step "Check GitHub login"
   log "Checking GitHub authentication"
   if gh auth status >/dev/null 2>&1; then
     green "GitHub CLI already authenticated"
@@ -380,84 +142,33 @@ ensure_github_auth() {
   fi
 
   warn "GitHub login is required for the next setup step."
-  cyan "请按 gh auth login 显示的浏览器或设备码提示完成登录。"
+  cyan "Follow the browser or device-code prompt from gh auth login."
   gh auth login -h github.com -s repo
 }
 
-ensure_github_ssh() {
-  step "配置 GitHub SSH"
-  log "Configuring GitHub SSH"
-
-  local key_title
-  key_title="$(github_ssh_key_title)"
-
-  mkdir -p "$HOME/.ssh"
-  chmod 700 "$HOME/.ssh"
-
-  if [ ! -f "$HOME/.ssh/id_ed25519" ]; then
-    notice "必需生成" "SSH key" "用于通过 SSH 拉取和推送 GitHub 仓库。"
-    ssh-keygen -t ed25519 -C "$key_title" -f "$HOME/.ssh/id_ed25519" -N ""
-  fi
-
-  if [ -f "$HOME/.ssh/id_ed25519.pub" ]; then
-    local public_key
-    public_key="$(cat "$HOME/.ssh/id_ed25519.pub")"
-
-    if run_with_status "Checking GitHub SSH keys" 20 gh ssh-key list; then
-      if grep -F "$public_key" "$RUN_STATUS_OUTPUT" >/dev/null 2>&1; then
-        green "SSH key already registered"
-        cleanup_status_files
-        run_with_timeout 10 gh config set git_protocol ssh -h github.com >/dev/null 2>&1 || true
-        return
-      fi
-    else
-      cyan "Cannot confirm existing SSH keys; will try to add this key."
-    fi
-    cleanup_status_files
-
-    if run_with_status "Adding SSH key to GitHub: $key_title" 20 gh ssh-key add "$HOME/.ssh/id_ed25519.pub" --title "$key_title"; then
-      green "SSH key registered"
-    else
-      cyan "SSH key add skipped or timed out; it may already exist."
-      cyan "如果后续拉取私有仓库失败，把下面这行公钥加到 GitHub SSH keys:"
-      cat "$HOME/.ssh/id_ed25519.pub"
-    fi
-    cleanup_status_files
-  fi
-
-  run_with_timeout 10 gh config set git_protocol ssh -h github.com >/dev/null 2>&1 || true
-}
-
 init_or_update_dotfiles() {
-  step "拉取配置仓库"
+  step "Fetch dotfiles"
   log "Setting up chezmoi source"
 
   if [ -z "$DOTFILES_REPO" ]; then
     github_user="$(gh api user --jq .login)"
     DOTFILES_REPO="$github_user/dotfiles"
   fi
-  DOTFILES_SSH_URL="git@github.com:$DOTFILES_REPO.git"
+  gh config set git_protocol https -h github.com >/dev/null
 
   if [ -d "$CHEZMOI_SOURCE/.git" ]; then
-    current_url="$(git -C "$CHEZMOI_SOURCE" remote get-url origin 2>/dev/null || true)"
-    case "$current_url" in
-      https://github.com/*)
-        cyan "已存在的配置仓库使用 HTTPS，切换为 SSH。"
-        git -C "$CHEZMOI_SOURCE" remote set-url origin "$DOTFILES_SSH_URL"
-        ;;
-    esac
     git -C "$CHEZMOI_SOURCE" pull --ff-only
     return
   fi
 
   if [ -d "$CHEZMOI_SOURCE" ]; then
-    red "$CHEZMOI_SOURCE 已存在，但不是 Git 仓库。"
-    red "请先确认里面内容，移走或备份后再重跑初始化命令。"
+    red "$CHEZMOI_SOURCE exists but is not a Git repository."
+    red "Move or back it up, then rerun this command."
     exit 1
   fi
 
   mkdir -p "$(dirname "$CHEZMOI_SOURCE")"
-  git clone "$DOTFILES_SSH_URL" "$CHEZMOI_SOURCE"
+  gh repo clone "$DOTFILES_REPO" "$CHEZMOI_SOURCE"
 }
 
 run_dotfiles_bootstrap() {
@@ -466,7 +177,7 @@ run_dotfiles_bootstrap() {
     chmod +x "$CHEZMOI_SOURCE/files/doctor.sh"
   fi
 
-  step "运行初始化脚本"
+  step "Run dotfiles bootstrap"
   log "Running dotfiles bootstrap"
   exec "$CHEZMOI_SOURCE/files/bootstrap.sh"
 }
@@ -485,7 +196,5 @@ case "$OS" in
 esac
 
 ensure_github_auth
-configure_device_name
-ensure_github_ssh
 init_or_update_dotfiles
 run_dotfiles_bootstrap
