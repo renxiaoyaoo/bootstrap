@@ -60,6 +60,84 @@ as_root() {
   fi
 }
 
+run_with_timeout() {
+  local seconds="$1"
+  shift
+  "$@" &
+  local pid=$!
+  local elapsed=0
+
+  while kill -0 "$pid" 2>/dev/null; do
+    if [ "$elapsed" -ge "$seconds" ]; then
+      kill "$pid" 2>/dev/null || true
+      wait "$pid" 2>/dev/null || true
+      return 124
+    fi
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+
+  wait "$pid"
+}
+
+RUN_STATUS_OUTPUT=""
+RUN_STATUS_ERROR=""
+
+cleanup_status_files() {
+  [ -n "$RUN_STATUS_OUTPUT" ] && rm -f "$RUN_STATUS_OUTPUT"
+  [ -n "$RUN_STATUS_ERROR" ] && rm -f "$RUN_STATUS_ERROR"
+  RUN_STATUS_OUTPUT=""
+  RUN_STATUS_ERROR=""
+}
+
+run_with_status() {
+  local label="$1"
+  local seconds="$2"
+  shift 2
+  local pid elapsed frame status
+
+  cleanup_status_files
+  RUN_STATUS_OUTPUT="$(mktemp)"
+  RUN_STATUS_ERROR="$(mktemp)"
+
+  "$@" >"$RUN_STATUS_OUTPUT" 2>"$RUN_STATUS_ERROR" &
+  pid=$!
+  elapsed=0
+
+  while kill -0 "$pid" 2>/dev/null; do
+    if [ "$elapsed" -ge "$seconds" ]; then
+      kill "$pid" 2>/dev/null || true
+      wait "$pid" 2>/dev/null || true
+      if [ -t 1 ]; then
+        printf "\r\033[K"
+      fi
+      yellow "$label: timeout"
+      return 124
+    fi
+
+    frame="$(printf '|/-\\' | cut -c $((elapsed % 4 + 1)))"
+    if [ -t 1 ]; then
+      printf "\r%s %s... %ss" "$frame" "$label" "$elapsed"
+    elif [ "$elapsed" -eq 0 ]; then
+      cyan "$label..."
+    fi
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+
+  wait "$pid"
+  status=$?
+  if [ -t 1 ]; then
+    printf "\r\033[K"
+  fi
+  if [ "$status" -eq 0 ]; then
+    green "$label: ok"
+  else
+    yellow "$label: failed"
+  fi
+  return "$status"
+}
+
 github_ssh_key_title() {
   local device_name
   device_name="$(ssh_key_device_name)"
@@ -291,15 +369,32 @@ ensure_github_ssh() {
   fi
 
   if [ -f "$HOME/.ssh/id_ed25519.pub" ]; then
-    cyan "Adding SSH key to GitHub: $key_title"
-    if gh ssh-key add "$HOME/.ssh/id_ed25519.pub" --title "$key_title" >/dev/null 2>&1; then
+    local public_key
+    public_key="$(cat "$HOME/.ssh/id_ed25519.pub")"
+
+    if run_with_status "Checking GitHub SSH keys" 20 gh ssh-key list; then
+      if grep -F "$public_key" "$RUN_STATUS_OUTPUT" >/dev/null 2>&1; then
+        green "SSH key already registered"
+        cleanup_status_files
+        run_with_timeout 10 gh config set git_protocol ssh -h github.com >/dev/null 2>&1 || true
+        return
+      fi
+    else
+      cyan "Cannot confirm existing SSH keys; will try to add this key."
+    fi
+    cleanup_status_files
+
+    if run_with_status "Adding SSH key to GitHub: $key_title" 20 gh ssh-key add "$HOME/.ssh/id_ed25519.pub" --title "$key_title"; then
       green "SSH key registered"
     else
-      cyan "SSH key may already exist, continue"
+      cyan "SSH key add skipped or timed out; it may already exist."
+      cyan "如果后续拉取私有仓库失败，把下面这行公钥加到 GitHub SSH keys:"
+      cat "$HOME/.ssh/id_ed25519.pub"
     fi
+    cleanup_status_files
   fi
 
-  gh config set git_protocol ssh -h github.com >/dev/null
+  run_with_timeout 10 gh config set git_protocol ssh -h github.com >/dev/null 2>&1 || true
 }
 
 init_or_update_dotfiles() {
