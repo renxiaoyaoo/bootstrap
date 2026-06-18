@@ -184,7 +184,7 @@ device_short_name() {
 
 current_network_name() {
   if [ "$OS" = "Darwin" ]; then
-    scutil --get HostName 2>/dev/null || scutil --get LocalHostName 2>/dev/null || true
+    scutil --get HostName 2>/dev/null || scutil --get LocalHostName 2>/dev/null || hostname -s 2>/dev/null || hostname
   else
     hostname -s 2>/dev/null || hostname
   fi
@@ -210,12 +210,16 @@ configure_device_name() {
   fi
 
   if [ "$OS" = "Darwin" ]; then
-    local current_computer current_network
+    local current_computer current_network current_host current_local current_hostname
     local computer_name network_name network_suggestion raw_name safe_name changed
 
     current_computer="$(scutil --get ComputerName 2>/dev/null || device_short_name)"
+    current_host="$(scutil --get HostName 2>/dev/null || true)"
+    current_local="$(scutil --get LocalHostName 2>/dev/null || true)"
+    current_hostname="$(hostname -s 2>/dev/null || hostname)"
     current_network="$(current_network_name)"
 
+    cyan "当前: ComputerName=${current_computer:-未设置}, HostName=${current_host:-未设置}, LocalHostName=${current_local:-未设置}, hostname=${current_hostname:-未设置}"
     cyan "ComputerName: 关于本机/共享显示名，可有空格。"
     printf "ComputerName [%s]: " "$current_computer"
     prompt_read computer_name
