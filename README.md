@@ -1,6 +1,6 @@
 # bootstrap
 
-公开的新设备初始化入口。
+公开的新设备初始化入口。它只负责准备基础工具、登录 GitHub、拉取私有 dotfiles，然后交给 dotfiles 完成个人配置。
 
 ## macOS
 
@@ -24,7 +24,7 @@ else
 fi
 ```
 
-## 检查
+## 初始化后检查
 
 ```sh
 ~/.local/share/chezmoi/files/doctor.sh
