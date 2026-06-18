@@ -62,7 +62,7 @@ as_root() {
 
 github_ssh_key_title() {
   local device_name
-  device_name="$(device_short_name)"
+  device_name="$(ssh_key_device_name)"
 
   local default_title="$(whoami)@$device_name"
   local title="$default_title"
@@ -75,6 +75,10 @@ github_ssh_key_title() {
   fi
 
   echo "$title"
+}
+
+ssh_key_device_name() {
+  device_short_name | sed 's/[.]local$//'
 }
 
 device_short_name() {
@@ -93,10 +97,6 @@ sanitize_local_hostname() {
   printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[.]local$//; s/[^a-z0-9-]/-/g; s/--*/-/g; s/^-//; s/-$//'
 }
 
-sanitize_host_name() {
-  printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9.-]/-/g; s/--*/-/g; s/[.][.]*/./g; s/^[.-]//; s/[.-]$//'
-}
-
 configure_device_name() {
   step "设置设备名称"
 
@@ -109,48 +109,31 @@ configure_device_name() {
   fi
 
   if [ "$OS" = "Darwin" ]; then
-    local current_computer current_local current_host
-    local computer_name local_name host_name local_base_suggestion local_suggestion host_suggestion raw_name safe_name changed
+    local current_computer current_local
+    local computer_name network_name network_suggestion raw_name safe_name changed
 
     current_computer="$(scutil --get ComputerName 2>/dev/null || device_short_name)"
     current_local="$(scutil --get LocalHostName 2>/dev/null || sanitize_local_hostname "$current_computer")"
-    current_host="$(scutil --get HostName 2>/dev/null || true)"
 
-    cyan "分别设置 macOS 三个名称。回车使用方括号里的建议值。"
+    cyan "设置 macOS 设备名称。回车使用方括号里的建议值。"
     cyan "ComputerName: 系统设置、共享和隔空投送里看到的显示名，可以有空格。"
     printf "ComputerName（关于本机显示名）[%s]: " "$current_computer"
     read -r computer_name
     [ -z "$computer_name" ] && computer_name="$current_computer"
 
-    local_base_suggestion="$(sanitize_local_hostname "$computer_name")"
-    [ -z "$local_base_suggestion" ] && local_base_suggestion="$current_local"
-    local_suggestion="${local_base_suggestion}.local"
-    cyan "LocalHostName: 局域网/Bonjour 名称，通常用 xxxx.local 访问；系统实际保存 xxxx。"
-    printf "LocalHostName（局域网名称，通常显示为 .local）[%s]: " "$local_suggestion"
+    network_suggestion="$(sanitize_local_hostname "$computer_name")"
+    [ -z "$network_suggestion" ] && network_suggestion="$current_local"
+    cyan "网络/SSH 名称: 同时用于 LocalHostName 和 HostName；局域网访问通常是 xxxx.local，系统实际保存 xxxx。"
+    printf "网络/SSH 名称 [%s.local]: " "$network_suggestion"
     read -r raw_name
-    [ -z "$raw_name" ] && raw_name="$local_suggestion"
+    [ -z "$raw_name" ] && raw_name="$network_suggestion"
     safe_name="$(sanitize_local_hostname "$raw_name")"
     if [ "$raw_name" != "$safe_name" ] && [ "$raw_name" != "${safe_name}.local" ]; then
-      cyan "LocalHostName 将使用安全值: ${safe_name}.local"
+      cyan "网络/SSH 名称将使用安全值: ${safe_name}"
     fi
-    local_name="$safe_name"
+    network_name="$safe_name"
 
-    if [ -n "$local_name" ]; then
-      host_suggestion="${local_name}.local"
-    else
-      host_suggestion="$current_host"
-    fi
-    cyan "HostName: SSH、终端和部分网络服务使用；通常跟 LocalHostName 保持一致。"
-    printf "HostName（SSH、终端和部分网络服务）[%s]: " "$host_suggestion"
-    read -r raw_name
-    [ -z "$raw_name" ] && raw_name="$host_suggestion"
-    safe_name="$(sanitize_host_name "$raw_name")"
-    if [ "$safe_name" != "$raw_name" ]; then
-      cyan "HostName 将使用安全值: $safe_name"
-    fi
-    host_name="$safe_name"
-
-    if [ -z "$local_name" ] || [ -z "$host_name" ]; then
+    if [ -z "$network_name" ]; then
       red "设备名无效，保留当前值。"
       return
     fi
@@ -161,19 +144,19 @@ configure_device_name() {
       as_root scutil --set ComputerName "$computer_name"
       changed=1
     fi
-    if [ "$(scutil --get LocalHostName 2>/dev/null || true)" != "$local_name" ]; then
-      as_root scutil --set LocalHostName "$local_name"
+    if [ "$(scutil --get LocalHostName 2>/dev/null || true)" != "$network_name" ]; then
+      as_root scutil --set LocalHostName "$network_name"
       changed=1
     fi
-    if [ "$(scutil --get HostName 2>/dev/null || true)" != "$host_name" ]; then
-      as_root scutil --set HostName "$host_name"
+    if [ "$(scutil --get HostName 2>/dev/null || true)" != "$network_name" ]; then
+      as_root scutil --set HostName "$network_name"
       changed=1
     fi
 
     if [ "$changed" -eq 0 ]; then
-      green "Device name already configured: $host_name"
+      green "Device name already configured: $network_name"
     else
-      green "Device name configured: $host_name"
+      green "Device name configured: $network_name"
     fi
   elif command -v hostnamectl >/dev/null 2>&1; then
     local raw_name safe_name
