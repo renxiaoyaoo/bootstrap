@@ -161,8 +161,8 @@ github_ssh_key_title() {
   local title="$default_title"
 
   if has_tty; then
-    cyan "SSH key 名称: 只用于 GitHub 页面识别。"
-    printf "SSH key 名称 [%s]: " "$default_title"
+    cyan "SSH key 名称: 只用于 GitHub 页面识别；直接回车即可。" > /dev/tty
+    printf "SSH key 名称 [%s]: " "$default_title" > /dev/tty
     prompt_read title
     [ -z "$title" ] && title="$default_title"
   fi
