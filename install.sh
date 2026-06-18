@@ -60,6 +60,23 @@ as_root() {
   fi
 }
 
+github_ssh_key_title() {
+  local device_name
+  device_name="$(hostname -s 2>/dev/null || hostname)"
+
+  local default_title="$(whoami)@$device_name"
+  local title="$default_title"
+
+  if [ -t 0 ]; then
+    cyan "GitHub SSH key 名称用于在 GitHub 网页里识别这台设备。"
+    printf "名称 [%s]: " "$default_title"
+    read -r title
+    [ -z "$title" ] && title="$default_title"
+  fi
+
+  echo "$title"
+}
+
 ensure_macos_prereqs() {
   step "检查 macOS 基础依赖"
   log "Checking Xcode Command Line Tools"
@@ -150,16 +167,19 @@ ensure_github_ssh() {
   step "配置 GitHub SSH"
   log "Configuring GitHub SSH"
 
+  local key_title
+  key_title="$(github_ssh_key_title)"
+
   mkdir -p "$HOME/.ssh"
   chmod 700 "$HOME/.ssh"
 
   if [ ! -f "$HOME/.ssh/id_ed25519" ]; then
     notice "必需生成" "SSH key" "用于通过 SSH 拉取和推送 GitHub 仓库。"
-    ssh-keygen -t ed25519 -C "$(whoami)@$(hostname)-$(date +%Y%m%d)" -f "$HOME/.ssh/id_ed25519" -N ""
+    ssh-keygen -t ed25519 -C "$key_title" -f "$HOME/.ssh/id_ed25519" -N ""
   fi
 
   if [ -f "$HOME/.ssh/id_ed25519.pub" ]; then
-    gh ssh-key add "$HOME/.ssh/id_ed25519.pub" --title "$(hostname)-$(date +%Y%m%d)" 2>/dev/null || true
+    gh ssh-key add "$HOME/.ssh/id_ed25519.pub" --title "$key_title" 2>/dev/null || true
   fi
 
   gh config set git_protocol ssh -h github.com >/dev/null
