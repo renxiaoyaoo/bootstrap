@@ -14,7 +14,7 @@ DOTFILES_REPO="${DOTFILES_REPO:-}"
 CHEZMOI_SOURCE="$HOME/.local/share/chezmoi"
 OS="$(uname)"
 STEP=0
-TOTAL_STEPS=5
+TOTAL_STEPS=6
 
 step() {
   STEP=$((STEP + 1))
@@ -62,7 +62,7 @@ as_root() {
 
 github_ssh_key_title() {
   local device_name
-  device_name="$(hostname -s 2>/dev/null || hostname)"
+  device_name="$(device_short_name)"
 
   local default_title="$(whoami)@$device_name"
   local title="$default_title"
@@ -75,6 +75,136 @@ github_ssh_key_title() {
   fi
 
   echo "$title"
+}
+
+device_short_name() {
+  if [ "$OS" = "Darwin" ]; then
+    scutil --get HostName 2>/dev/null || scutil --get LocalHostName 2>/dev/null || hostname -s 2>/dev/null || hostname
+  else
+    hostname -s 2>/dev/null || hostname
+  fi
+}
+
+sanitize_hostname() {
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g; s/--*/-/g; s/^-//; s/-$//'
+}
+
+sanitize_local_hostname() {
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[.]local$//; s/[^a-z0-9-]/-/g; s/--*/-/g; s/^-//; s/-$//'
+}
+
+sanitize_host_name() {
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9.-]/-/g; s/--*/-/g; s/[.][.]*/./g; s/^[.-]//; s/[.-]$//'
+}
+
+configure_device_name() {
+  step "设置设备名称"
+
+  local current_name
+  current_name="$(device_short_name)"
+
+  if [ ! -t 0 ]; then
+    cyan "非交互环境，保留当前设备名: $current_name"
+    return
+  fi
+
+  if [ "$OS" = "Darwin" ]; then
+    local current_computer current_local current_host
+    local computer_name local_name host_name local_base_suggestion local_suggestion host_suggestion raw_name safe_name changed
+
+    current_computer="$(scutil --get ComputerName 2>/dev/null || device_short_name)"
+    current_local="$(scutil --get LocalHostName 2>/dev/null || sanitize_local_hostname "$current_computer")"
+    current_host="$(scutil --get HostName 2>/dev/null || true)"
+
+    cyan "分别设置 macOS 三个名称。回车使用方括号里的建议值。"
+    cyan "ComputerName: 系统设置、共享和隔空投送里看到的显示名，可以有空格。"
+    printf "ComputerName（关于本机显示名）[%s]: " "$current_computer"
+    read -r computer_name
+    [ -z "$computer_name" ] && computer_name="$current_computer"
+
+    local_base_suggestion="$(sanitize_local_hostname "$computer_name")"
+    [ -z "$local_base_suggestion" ] && local_base_suggestion="$current_local"
+    local_suggestion="${local_base_suggestion}.local"
+    cyan "LocalHostName: 局域网/Bonjour 名称，通常用 xxxx.local 访问；系统实际保存 xxxx。"
+    printf "LocalHostName（局域网名称，通常显示为 .local）[%s]: " "$local_suggestion"
+    read -r raw_name
+    [ -z "$raw_name" ] && raw_name="$local_suggestion"
+    safe_name="$(sanitize_local_hostname "$raw_name")"
+    if [ "$raw_name" != "$safe_name" ] && [ "$raw_name" != "${safe_name}.local" ]; then
+      cyan "LocalHostName 将使用安全值: ${safe_name}.local"
+    fi
+    local_name="$safe_name"
+
+    if [ -n "$local_name" ]; then
+      host_suggestion="${local_name}.local"
+    else
+      host_suggestion="$current_host"
+    fi
+    cyan "HostName: SSH、终端和部分网络服务使用；通常跟 LocalHostName 保持一致。"
+    printf "HostName（SSH、终端和部分网络服务）[%s]: " "$host_suggestion"
+    read -r raw_name
+    [ -z "$raw_name" ] && raw_name="$host_suggestion"
+    safe_name="$(sanitize_host_name "$raw_name")"
+    if [ "$safe_name" != "$raw_name" ]; then
+      cyan "HostName 将使用安全值: $safe_name"
+    fi
+    host_name="$safe_name"
+
+    if [ -z "$local_name" ] || [ -z "$host_name" ]; then
+      red "设备名无效，保留当前值。"
+      return
+    fi
+
+    notice "需要设置" "macOS 设备名称" "ComputerName/LocalHostName/HostName 会影响关于本机、局域网名称和 SSH/终端识别。"
+    changed=0
+    if [ "$(scutil --get ComputerName 2>/dev/null || true)" != "$computer_name" ]; then
+      as_root scutil --set ComputerName "$computer_name"
+      changed=1
+    fi
+    if [ "$(scutil --get LocalHostName 2>/dev/null || true)" != "$local_name" ]; then
+      as_root scutil --set LocalHostName "$local_name"
+      changed=1
+    fi
+    if [ "$(scutil --get HostName 2>/dev/null || true)" != "$host_name" ]; then
+      as_root scutil --set HostName "$host_name"
+      changed=1
+    fi
+
+    if [ "$changed" -eq 0 ]; then
+      green "Device name already configured: $host_name"
+    else
+      green "Device name configured: $host_name"
+    fi
+  elif command -v hostnamectl >/dev/null 2>&1; then
+    local raw_name safe_name
+
+    cyan "设置 Linux hostname。回车使用方括号里的建议值。"
+    cyan "HostName: 局域网、SSH、终端和服务识别使用；Linux 通常用短名称。"
+    printf "HostName（局域网、SSH 和服务识别）[%s]: " "$current_name"
+    read -r raw_name
+    [ -z "$raw_name" ] && raw_name="$current_name"
+    safe_name="$(sanitize_hostname "$raw_name")"
+    if [ "$safe_name" != "$raw_name" ]; then
+      cyan "HostName 将使用安全值: $safe_name"
+    fi
+
+    if [ -z "$safe_name" ]; then
+      red "设备名无效，保留当前值: $current_name"
+      return
+    fi
+
+    if [ "$(hostnamectl --static 2>/dev/null || hostname)" = "$safe_name" ]; then
+      green "Device name already configured: $safe_name"
+      return
+    fi
+
+    notice "需要设置" "Linux hostname" "用于局域网、SSH 和服务识别。"
+    as_root hostnamectl set-hostname "$safe_name"
+    green "Device name configured: $safe_name"
+  else
+    yellow "当前 Linux 没有 hostnamectl，跳过持久化设备名。"
+    cyan "如需设置，请按发行版方式手动配置 hostname: $safe_name"
+  fi
 }
 
 ensure_macos_prereqs() {
@@ -242,6 +372,7 @@ case "$OS" in
 esac
 
 ensure_github_auth
+configure_device_name
 ensure_github_ssh
 init_or_update_dotfiles
 run_dotfiles_bootstrap
