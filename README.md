@@ -5,7 +5,7 @@
 ## macOS
 
 ```sh
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/renxiaoyaoo/bootstrap/master/install.sh)"
+curl -fsSL -H 'Cache-Control: no-cache' "https://raw.githubusercontent.com/renxiaoyaoo/bootstrap/master/install.sh?ts=$(date +%s)" | /bin/bash
 ```
 
 如果弹出 Xcode Command Line Tools 安装窗口，先完成安装，然后重跑同一条命令。
@@ -14,13 +14,13 @@
 
 ```sh
 if command -v curl >/dev/null 2>&1; then
-  bash -c "$(curl -fsSL https://raw.githubusercontent.com/renxiaoyaoo/bootstrap/master/install.sh)"
+  curl -fsSL -H 'Cache-Control: no-cache' "https://raw.githubusercontent.com/renxiaoyaoo/bootstrap/master/install.sh?ts=$(date +%s)" | bash
 elif command -v wget >/dev/null 2>&1; then
-  bash -c "$(wget -qO- https://raw.githubusercontent.com/renxiaoyaoo/bootstrap/master/install.sh)"
+  wget --no-cache -qO- "https://raw.githubusercontent.com/renxiaoyaoo/bootstrap/master/install.sh?ts=$(date +%s)" | bash
 else
   sudo apt-get update
   sudo apt-get install -y curl
-  bash -c "$(curl -fsSL https://raw.githubusercontent.com/renxiaoyaoo/bootstrap/master/install.sh)"
+  curl -fsSL -H 'Cache-Control: no-cache' "https://raw.githubusercontent.com/renxiaoyaoo/bootstrap/master/install.sh?ts=$(date +%s)" | bash
 fi
 ```
 
