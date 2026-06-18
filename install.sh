@@ -182,6 +182,14 @@ device_short_name() {
   fi
 }
 
+current_network_name() {
+  if [ "$OS" = "Darwin" ]; then
+    scutil --get HostName 2>/dev/null || scutil --get LocalHostName 2>/dev/null || true
+  else
+    hostname -s 2>/dev/null || hostname
+  fi
+}
+
 sanitize_hostname() {
   printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g; s/--*/-/g; s/^-//; s/-$//'
 }
@@ -202,19 +210,23 @@ configure_device_name() {
   fi
 
   if [ "$OS" = "Darwin" ]; then
-    local current_computer current_local
+    local current_computer current_network
     local computer_name network_name network_suggestion raw_name safe_name changed
 
     current_computer="$(scutil --get ComputerName 2>/dev/null || device_short_name)"
-    current_local="$(scutil --get LocalHostName 2>/dev/null || sanitize_local_hostname "$current_computer")"
+    current_network="$(current_network_name)"
 
     cyan "ComputerName: 关于本机/共享显示名，可有空格。"
     printf "ComputerName [%s]: " "$current_computer"
     prompt_read computer_name
     [ -z "$computer_name" ] && computer_name="$current_computer"
 
-    network_suggestion="$(sanitize_local_hostname "$computer_name")"
-    [ -z "$network_suggestion" ] && network_suggestion="$current_local"
+    if [ "$computer_name" = "$current_computer" ] && [ -n "$current_network" ]; then
+      network_suggestion="$(sanitize_local_hostname "$current_network")"
+    else
+      network_suggestion="$(sanitize_local_hostname "$computer_name")"
+      [ -z "$network_suggestion" ] && network_suggestion="$(sanitize_local_hostname "$current_network")"
+    fi
     cyan "网络/SSH 名称: 输入基础名即可；访问时是 ${network_suggestion}.local。"
     printf "网络/SSH 名称 [%s]: " "$network_suggestion"
     prompt_read raw_name
