@@ -80,6 +80,21 @@ run_with_timeout() {
   wait "$pid"
 }
 
+has_tty() {
+  [ -r /dev/tty ] && [ -w /dev/tty ]
+}
+
+prompt_read() {
+  local __var="$1"
+  local __value
+  if has_tty; then
+    IFS= read -r __value < /dev/tty
+  else
+    __value=""
+  fi
+  eval "$__var=\$__value"
+}
+
 RUN_STATUS_OUTPUT=""
 RUN_STATUS_ERROR=""
 
@@ -145,10 +160,10 @@ github_ssh_key_title() {
   local default_title="$(whoami)@$device_name"
   local title="$default_title"
 
-  if [ -t 0 ]; then
+  if has_tty; then
     cyan "SSH key 名称: 只用于 GitHub 页面识别。"
     printf "SSH key 名称 [%s]: " "$default_title"
-    read -r title
+    prompt_read title
     [ -z "$title" ] && title="$default_title"
   fi
 
@@ -181,7 +196,7 @@ configure_device_name() {
   local current_name
   current_name="$(device_short_name)"
 
-  if [ ! -t 0 ]; then
+  if ! has_tty; then
     cyan "非交互环境，保留当前设备名: $current_name"
     return
   fi
@@ -195,14 +210,14 @@ configure_device_name() {
 
     cyan "ComputerName: 关于本机/共享显示名，可有空格。"
     printf "ComputerName [%s]: " "$current_computer"
-    read -r computer_name
+    prompt_read computer_name
     [ -z "$computer_name" ] && computer_name="$current_computer"
 
     network_suggestion="$(sanitize_local_hostname "$computer_name")"
     [ -z "$network_suggestion" ] && network_suggestion="$current_local"
     cyan "网络/SSH 名称: 输入基础名即可；访问时是 ${network_suggestion}.local。"
     printf "网络/SSH 名称 [%s]: " "$network_suggestion"
-    read -r raw_name
+    prompt_read raw_name
     [ -z "$raw_name" ] && raw_name="$network_suggestion"
     safe_name="$(sanitize_local_hostname "$raw_name")"
     if [ "$raw_name" != "$safe_name" ] && [ "$raw_name" != "${safe_name}.local" ]; then
@@ -241,7 +256,7 @@ configure_device_name() {
     cyan "设置 Linux hostname。回车使用方括号里的建议值。"
     cyan "HostName: 局域网、SSH、终端和服务识别使用；Linux 通常用短名称。"
     printf "HostName（局域网、SSH 和服务识别）[%s]: " "$current_name"
-    read -r raw_name
+    prompt_read raw_name
     [ -z "$raw_name" ] && raw_name="$current_name"
     safe_name="$(sanitize_hostname "$raw_name")"
     if [ "$safe_name" != "$raw_name" ]; then
