@@ -1,6 +1,6 @@
 # bootstrap
 
-Public entrypoint for a new device. It installs the minimum tools, logs in to GitHub, fetches private dotfiles, then hands off personal setup to dotfiles.
+Public entrypoint for a new device. It prepares minimal tools, device identity, GitHub SSH access, and private dotfiles, then hands off personal setup to dotfiles.
 
 ## Start
 
