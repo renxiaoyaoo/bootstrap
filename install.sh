@@ -14,7 +14,7 @@ DOTFILES_REPO="${DOTFILES_REPO:-}"
 CHEZMOI_SOURCE="$HOME/.local/share/chezmoi"
 OS="$(uname)"
 STEP=0
-TOTAL_STEPS=6
+TOTAL_STEPS=5
 
 step() {
   STEP=$((STEP + 1))
@@ -274,7 +274,6 @@ ensure_linux_prereqs() {
 }
 
 ensure_github_auth() {
-  step "Check GitHub login"
   log "Checking GitHub authentication"
   if ! gh auth status >/dev/null 2>&1; then
     warn "GitHub login is required for private repositories and this device SSH key."
@@ -294,7 +293,6 @@ ensure_github_auth() {
 }
 
 configure_github_ssh() {
-  step "Configure GitHub SSH"
   log "Checking SSH key"
 
   mkdir -p "$HOME/.ssh"
@@ -337,6 +335,12 @@ configure_github_ssh() {
   fi
 
   gh config set git_protocol ssh -h github.com >/dev/null
+}
+
+configure_github_access() {
+  step "Configure GitHub access"
+  ensure_github_auth
+  configure_github_ssh
 }
 
 init_or_update_dotfiles() {
@@ -387,7 +391,6 @@ case "$OS" in
 esac
 
 configure_device_name
-ensure_github_auth
-configure_github_ssh
+configure_github_access
 init_or_update_dotfiles
 run_dotfiles_bootstrap
