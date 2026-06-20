@@ -275,7 +275,7 @@ ensure_linux_prereqs() {
 
 ensure_github_auth() {
   log "Checking GitHub authentication"
-  if ! gh auth status >/dev/null 2>&1; then
+  if ! gh auth status -h github.com >/dev/null 2>&1; then
     warn "GitHub login is required for private repositories and this device SSH key."
     cyan "Follow the browser or device-code prompt from gh auth login."
     gh auth login -h github.com --scopes "repo,admin:public_key" --git-protocol https
@@ -309,6 +309,12 @@ configure_github_ssh() {
     key_title="$(github_ssh_key_title)"
     notice "Required" "SSH key" "Access private GitHub repositories over SSH."
     ssh-keygen -t ed25519 -C "$key_title" -f "$HOME/.ssh/id_ed25519" -N ""
+  fi
+
+  if [ ! -f "$HOME/.ssh/id_ed25519.pub" ]; then
+    log "Rebuilding missing SSH public key"
+    ssh-keygen -y -f "$HOME/.ssh/id_ed25519" > "$HOME/.ssh/id_ed25519.pub"
+    chmod 644 "$HOME/.ssh/id_ed25519.pub"
   fi
 
   local public_key
