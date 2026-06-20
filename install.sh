@@ -276,14 +276,21 @@ ensure_linux_prereqs() {
 ensure_github_auth() {
   step "Check GitHub login"
   log "Checking GitHub authentication"
-  if gh auth status >/dev/null 2>&1; then
+  if ! gh auth status >/dev/null 2>&1; then
+    warn "GitHub login is required for private repositories and this device SSH key."
+    cyan "Follow the browser or device-code prompt from gh auth login."
+    gh auth login -h github.com --scopes "repo,admin:public_key" --git-protocol https
+    return
+  fi
+
+  if gh auth status -h github.com 2>&1 | grep -Eq "Token scopes:.*admin:public_key"; then
     green "GitHub CLI already authenticated"
     return
   fi
 
-  warn "GitHub login is required for private repositories and this device SSH key."
-  cyan "Follow the browser or device-code prompt from gh auth login."
-  gh auth login -h github.com --scopes "repo,admin:public_key" --git-protocol https
+  warn "GitHub CLI needs one permission upgrade for this device SSH key."
+  cyan "Complete the browser or device-code prompt once; existing login is retained."
+  gh auth refresh -h github.com --scopes "repo,admin:public_key"
 }
 
 configure_github_ssh() {
@@ -309,23 +316,16 @@ configure_github_ssh() {
   local public_key
   public_key="$(cat "$HOME/.ssh/id_ed25519.pub")"
 
-  if gh ssh-key list --json key --jq '.[].key' 2>/dev/null | grep -Fx "$public_key" >/dev/null 2>&1; then
+  local github_keys
+  if ! github_keys="$(gh ssh-key list --json key --jq '.[].key')"; then
+    red "Cannot read GitHub SSH keys. Rerun and complete GitHub authorization."
+    return 1
+  fi
+
+  if printf '%s\n' "$github_keys" | grep -Fx "$public_key" >/dev/null 2>&1; then
     green "SSH key already exists on GitHub"
   else
     [ -n "$key_title" ] || key_title="$(github_ssh_key_title)"
-    notice "Required" "GitHub SSH permission" "Allow GitHub CLI to read and add this device SSH key."
-    if ! gh auth refresh -h github.com -s admin:public_key; then
-      red "GitHub SSH permission was not granted."
-      red "Rerun this script and complete the GitHub authorization, then continue."
-      return 1
-    fi
-
-    if gh ssh-key list --json key --jq '.[].key' 2>/dev/null | grep -Fx "$public_key" >/dev/null 2>&1; then
-      green "SSH key already exists on GitHub"
-      gh config set git_protocol ssh -h github.com >/dev/null
-      return
-    fi
-
     notice "Required" "GitHub SSH key" "Upload this device key to GitHub with a stable device title."
     if gh ssh-key add "$HOME/.ssh/id_ed25519.pub" --title "$key_title"; then
       green "SSH key added to GitHub: $key_title"
