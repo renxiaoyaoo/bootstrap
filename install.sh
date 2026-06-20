@@ -281,9 +281,9 @@ ensure_github_auth() {
     return
   fi
 
-  warn "GitHub login is required for the next setup step."
+  warn "GitHub login is required for private repositories and this device SSH key."
   cyan "Follow the browser or device-code prompt from gh auth login."
-  gh auth login -h github.com -s repo --git-protocol https
+  gh auth login -h github.com --scopes "repo,admin:public_key" --git-protocol https
 }
 
 configure_github_ssh() {
