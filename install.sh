@@ -318,10 +318,10 @@ configure_github_ssh() {
   fi
 
   local public_key
-  public_key="$(cat "$HOME/.ssh/id_ed25519.pub")"
+  public_key="$(awk '{print $1, $2}' "$HOME/.ssh/id_ed25519.pub")"
 
   local github_keys
-  if ! github_keys="$(gh ssh-key list --json key --jq '.[].key')"; then
+  if ! github_keys="$(gh api user/keys --paginate --jq '.[].key' | awk '{print $1, $2}')"; then
     red "Cannot read GitHub SSH keys. Rerun and complete GitHub authorization."
     return 1
   fi
