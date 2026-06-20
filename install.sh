@@ -10,6 +10,12 @@ yellow(){ printf '\033[0;33m%s\033[0m\n' "$1"; }
 log() { cyan "▶ $1"; }
 warn() { yellow "⚠ $1"; }
 
+action_required() {
+  yellow "============================================================"
+  red "[ACTION REQUIRED] $1"
+  yellow "============================================================"
+}
+
 DOTFILES_REPO="${DOTFILES_REPO:-}"
 CHEZMOI_SOURCE="$HOME/.local/share/chezmoi"
 OS="$(uname)"
@@ -206,8 +212,7 @@ ensure_macos_prereqs() {
   if ! xcode-select -p >/dev/null 2>&1; then
     notice "Required" "Xcode Command Line Tools" "Provides git, compilers, and Homebrew system dependencies."
     xcode-select --install || true
-    cyan "Xcode Command Line Tools install requested."
-    cyan "After it finishes, rerun the bootstrap command."
+    action_required "Finish Xcode Command Line Tools, then rerun this bootstrap command."
     exit 0
   fi
 
