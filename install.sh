@@ -293,6 +293,12 @@ configure_github_ssh() {
   mkdir -p "$HOME/.ssh"
   chmod 700 "$HOME/.ssh"
 
+  if ! ssh-keygen -F github.com -f "$HOME/.ssh/known_hosts" >/dev/null 2>&1; then
+    log "Adding GitHub SSH host keys"
+    gh api meta --jq '.ssh_keys[]' | sed 's#^#github.com #' >> "$HOME/.ssh/known_hosts"
+    chmod 600 "$HOME/.ssh/known_hosts"
+  fi
+
   local key_title=""
   if [ ! -f "$HOME/.ssh/id_ed25519" ]; then
     key_title="$(github_ssh_key_title)"
@@ -307,13 +313,26 @@ configure_github_ssh() {
     green "SSH key already exists on GitHub"
   else
     [ -n "$key_title" ] || key_title="$(github_ssh_key_title)"
+    notice "Required" "GitHub SSH permission" "Allow GitHub CLI to read and add this device SSH key."
+    if ! gh auth refresh -h github.com -s admin:public_key; then
+      red "GitHub SSH permission was not granted."
+      red "Rerun this script and complete the GitHub authorization, then continue."
+      return 1
+    fi
+
+    if gh ssh-key list --json key --jq '.[].key' 2>/dev/null | grep -Fx "$public_key" >/dev/null 2>&1; then
+      green "SSH key already exists on GitHub"
+      gh config set git_protocol ssh -h github.com >/dev/null
+      return
+    fi
+
     notice "Required" "GitHub SSH key" "Upload this device key to GitHub with a stable device title."
     if gh ssh-key add "$HOME/.ssh/id_ed25519.pub" --title "$key_title"; then
       green "SSH key added to GitHub: $key_title"
     else
-      yellow "SSH key upload failed."
-      cyan "If private repo access fails, add this public key to GitHub SSH keys:"
-      cat "$HOME/.ssh/id_ed25519.pub"
+      red "GitHub SSH key upload failed."
+      red "Fix GitHub authorization and rerun; dotfiles will not be fetched yet."
+      return 1
     fi
   fi
 
