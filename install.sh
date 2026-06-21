@@ -134,6 +134,11 @@ configure_device_name() {
     current_hostname="$(hostname -s 2>/dev/null || hostname)"
     current_network="$(device_short_name)"
 
+    if [ "${BOOTSTRAP_RENAME:-0}" != "1" ] && [ -n "$current_host" ] && [ "$current_host" = "$current_local" ] && [ "$current_host" = "$current_hostname" ]; then
+      green "Device name already current: $current_host"
+      return
+    fi
+
     cyan "Current: ComputerName=${current_computer:-unset}, HostName=${current_host:-unset}, LocalHostName=${current_local:-unset}, hostname=${current_hostname:-unset}"
     cyan "ComputerName: 关于本机/共享里显示的名字，可以包含空格。"
     printf "ComputerName [%s]: " "$current_computer"
@@ -180,6 +185,11 @@ configure_device_name() {
     fi
   elif command -v hostnamectl >/dev/null 2>&1; then
     local raw_name safe_name
+
+    if [ "${BOOTSTRAP_RENAME:-0}" != "1" ] && [ "$(hostnamectl --static 2>/dev/null || hostname)" = "$current_name" ]; then
+      green "Device name already current: $current_name"
+      return
+    fi
 
     cyan "Set Linux hostname. Press Enter to use the suggested value."
     cyan "HostName: 用于局域网、SSH、终端和服务识别；Linux 通常用短名称。"
@@ -253,11 +263,20 @@ ensure_linux_prereqs() {
     exit 1
   fi
 
-  as_root apt-get update
+  missing_packages=()
   for pkg in curl git ca-certificates openssh-client; do
-    notice_tool "Required/check" "$pkg"
-    as_root apt-get install -y "$pkg"
+    dpkg-query -W -f='${db:Status-Status}' "$pkg" 2>/dev/null | grep -qx installed || missing_packages+=("$pkg")
   done
+
+  if [ "${#missing_packages[@]}" -gt 0 ]; then
+    as_root apt-get update
+    for pkg in "${missing_packages[@]}"; do
+      notice_tool "Required" "$pkg"
+      as_root apt-get install -y "$pkg"
+    done
+  else
+    green "Linux bootstrap tools already installed"
+  fi
 
   if ! command -v gh >/dev/null 2>&1; then
     if apt-cache show gh >/dev/null 2>&1; then
@@ -283,7 +302,7 @@ ensure_github_auth() {
   if ! gh auth status -h github.com >/dev/null 2>&1; then
     warn "GitHub login is required for private repositories and this device SSH key."
     cyan "Follow the browser or device-code prompt from gh auth login."
-    gh auth login -h github.com --scopes "repo,admin:public_key" --git-protocol https
+    gh auth login -h github.com --scopes "repo,admin:public_key" --git-protocol ssh
     return
   fi
 
