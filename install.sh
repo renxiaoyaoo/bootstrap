@@ -98,6 +98,10 @@ ssh_key_device_name() {
   device_short_name | sed 's/[.]local$//'
 }
 
+github_ssh_accessible() {
+  ssh -n -T -o BatchMode=yes -o ConnectTimeout=8 git@github.com 2>&1 | grep -q "successfully authenticated"
+}
+
 github_ssh_key_title() {
   local default_title title
   default_title="$(whoami)@$(ssh_key_device_name)"
@@ -134,7 +138,7 @@ configure_device_name() {
     current_hostname="$(hostname -s 2>/dev/null || hostname)"
     current_network="$(device_short_name)"
 
-    if [ "${BOOTSTRAP_RENAME:-0}" != "1" ] && [ -n "$current_host" ] && [ "$current_host" = "$current_local" ] && [ "$current_host" = "$current_hostname" ]; then
+    if [ -n "$current_host" ] && [ "$current_host" = "$current_local" ] && [ "$current_host" = "$current_hostname" ]; then
       green "Device name already current: $current_host"
       return
     fi
@@ -186,7 +190,7 @@ configure_device_name() {
   elif command -v hostnamectl >/dev/null 2>&1; then
     local raw_name safe_name
 
-    if [ "${BOOTSTRAP_RENAME:-0}" != "1" ] && [ "$(hostnamectl --static 2>/dev/null || hostname)" = "$current_name" ]; then
+    if [ "$(hostnamectl --static 2>/dev/null || hostname)" = "$current_name" ]; then
       green "Device name already current: $current_name"
       return
     fi
@@ -300,6 +304,10 @@ ensure_linux_prereqs() {
 ensure_github_auth() {
   log "Checking GitHub authentication"
   if ! gh auth status -h github.com >/dev/null 2>&1; then
+    if github_ssh_accessible; then
+      green "GitHub SSH already available; GitHub CLI login skipped"
+      return
+    fi
     warn "GitHub login is required for private repositories and this device SSH key."
     cyan "Follow the browser or device-code prompt from gh auth login."
     gh auth login -h github.com --scopes "repo,admin:public_key" --git-protocol ssh
@@ -344,6 +352,16 @@ configure_github_ssh() {
   local public_key
   public_key="$(awk '{print $1, $2}' "$HOME/.ssh/id_ed25519.pub")"
 
+  if ! gh auth status -h github.com >/dev/null 2>&1; then
+    if github_ssh_accessible; then
+      green "SSH key already works with GitHub"
+      gh config set git_protocol ssh -h github.com >/dev/null
+      return
+    fi
+    red "GitHub CLI login is required to register this SSH key."
+    return 1
+  fi
+
   local github_keys
   if ! github_keys="$(gh api user/keys --paginate --jq '.[].key' | awk '{print $1, $2}')"; then
     red "Cannot read GitHub SSH keys. Rerun and complete GitHub authorization."
@@ -378,8 +396,7 @@ init_or_update_dotfiles() {
   log "Setting up chezmoi source"
 
   if [ -z "$DOTFILES_REPO" ]; then
-    github_user="$(gh api user --jq .login)"
-    DOTFILES_REPO="$github_user/dotfiles"
+    DOTFILES_REPO="renxiaoyaoo/dotfiles"
   fi
   if [ -d "$CHEZMOI_SOURCE/.git" ]; then
     git -C "$CHEZMOI_SOURCE" pull --ff-only
@@ -393,7 +410,7 @@ init_or_update_dotfiles() {
   fi
 
   mkdir -p "$(dirname "$CHEZMOI_SOURCE")"
-  gh repo clone "$DOTFILES_REPO" "$CHEZMOI_SOURCE"
+  git clone "git@github.com:$DOTFILES_REPO.git" "$CHEZMOI_SOURCE"
 }
 
 run_dotfiles_bootstrap() {
